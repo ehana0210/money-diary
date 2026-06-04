@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>용돈기입장</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>용돈기입장</h1>
+      <p class="subtitle">오늘도 알뜰하게 관리해요</p>
+    </header>
+
+    <div id="panel-record" class="panel active">
+      <section class="balance-card">
+        <p class="balance-label">현재 잔액</p>
+        <p class="balance-amount" id="balance">0원</p>
+        <div class="summary">
+          <div class="summary-item income">
+            <span class="summary-label">들어온 돈</span>
+            <span class="summary-value" id="total-income">0원</span>
+          </div>
+          <div class="summary-divider"></div>
+          <div class="summary-item expense">
+            <span class="summary-label">나간 돈</span>
+            <span class="summary-value" id="total-expense">0원</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <h2>내역 추가</h2>
+        <form id="entry-form">
+          <div class="type-toggle">
+            <label class="type-option">
+              <input type="radio" name="type" value="expense" checked>
+              <span>나간 돈</span>
+            </label>
+            <label class="type-option">
+              <input type="radio" name="type" value="income">
+              <span>들어온 돈</span>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>날짜</label>
+              <div class="date-picker">
+                <select id="date-month" required></select>
+                <select id="date-day" required></select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="amount">금액</label>
+              <input type="number" id="amount" min="1" placeholder="0" required inputmode="numeric">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="category">카테고리</label>
+            <select id="category" required></select>
+          </div>
+
+          <div class="form-group">
+            <label for="memo">메모</label>
+            <input type="text" id="memo" placeholder="무엇에 썼나요?" maxlength="50">
+          </div>
+
+          <button type="submit" class="btn-primary">추가하기</button>
+        </form>
+      </section>
+
+      <section class="list-card">
+        <div class="list-header">
+          <h2>거래 내역</h2>
+          <select id="filter" class="filter-select">
+            <option value="all">전체</option>
+            <option value="income">들어온 돈</option>
+            <option value="expense">나간 돈</option>
+          </select>
+        </div>
+        <ul id="entry-list" class="entry-list"></ul>
+        <p id="empty-state" class="empty-state">아직 내역이 없어요. 첫 거래를 추가해보세요!</p>
+        <div id="entry-pagination" class="pagination hidden">
+          <button type="button" id="page-prev" class="page-btn">이전</button>
+          <span id="page-info" class="page-info">1 / 1</span>
+          <button type="button" id="page-next" class="page-btn">다음</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="panel-stats" class="panel">
+      <section class="card">
+        <div class="card-header">
+          <h2>통계</h2>
+          <div class="period-toggle">
+            <button type="button" class="period-btn active" data-period="week">주간</button>
+            <button type="button" class="period-btn" data-period="month">월간</button>
+          </div>
+        </div>
+        <p class="period-label" id="stats-period-label"></p>
+
+        <div class="stats-summary">
+          <div class="stats-box income">
+            <span class="stats-box-label">들어온 돈</span>
+            <span class="stats-box-value" id="stats-income">0원</span>
+          </div>
+          <div class="stats-box expense">
+            <span class="stats-box-label">나간 돈</span>
+            <span class="stats-box-value" id="stats-expense">0원</span>
+          </div>
+          <div class="stats-box balance">
+            <span class="stats-box-label">잔액</span>
+            <span class="stats-box-value" id="stats-balance">0원</span>
+          </div>
+        </div>
+
+        <h3 class="section-title">카테고리별 나간 돈</h3>
+        <ul id="stats-category-list" class="stats-category-list"></ul>
+        <p id="stats-empty" class="empty-state hidden">이번에 나간 돈이 없어요.</p>
+      </section>
+    </div>
+
+    <div id="panel-calendar" class="panel">
+      <section class="card">
+        <div class="calendar-nav">
+          <button type="button" class="nav-btn" id="cal-prev" aria-label="이전 달">‹</button>
+          <h2 id="cal-month-label"></h2>
+          <button type="button" class="nav-btn" id="cal-next" aria-label="다음 달">›</button>
+        </div>
+
+        <div class="calendar-weekdays">
+          <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span class="sun">일</span>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
+
+        <h3 class="section-title" id="cal-day-title">선택한 날짜</h3>
+        <ul id="cal-day-list" class="entry-list"></ul>
+        <p id="cal-day-empty" class="empty-state">날짜를 선택하면 내역이 표시됩니다.</p>
+      </section>
+    </div>
+
+    <div id="panel-category" class="panel">
+      <section class="card">
+        <h2>카테고리 관리</h2>
+
+        <div class="type-toggle category-type-toggle">
+          <label class="type-option">
+            <input type="radio" name="cat-type" value="expense" checked>
+            <span>나간 돈</span>
+          </label>
+          <label class="type-option">
+            <input type="radio" name="cat-type" value="income">
+            <span>들어온 돈</span>
+          </label>
+        </div>
+
+        <form id="category-form" class="category-form">
+          <div class="form-row category-form-row">
+            <div class="form-group">
+              <label for="cat-icon">아이콘</label>
+              <select id="cat-icon"></select>
+            </div>
+            <div class="form-group">
+              <label for="cat-label">이름</label>
+              <input type="text" id="cat-label" placeholder="카테고리 이름" maxlength="10" required>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary btn-sm">카테고리 추가</button>
+        </form>
+
+        <h3 class="section-title">내 카테고리</h3>
+        <ul id="category-list" class="category-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <nav class="tab-bar">
+    <button type="button" class="tab-btn active" data-tab="record">
+      <span class="tab-icon">📝</span>
+      <span class="tab-label">기록</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="stats">
+      <span class="tab-icon">📊</span>
+      <span class="tab-label">통계</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="calendar">
+      <span class="tab-icon">📅</span>
+      <span class="tab-label">캘린더</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="category">
+      <span class="tab-icon">🏷️</span>
+      <span class="tab-label">카테고리</span>
+    </button>
+  </nav>
+
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <p id="modal-message" class="modal-message"></p>
+      <div id="modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

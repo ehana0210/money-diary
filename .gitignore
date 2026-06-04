@@ -1,0 +1,30 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+/build/
+/app/build/
+/app/release/
+/captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# server
+/server/node_modules/
+/server/.env
+
+# store-screenshots dev deps
+/store-screenshots/node_modules/
+
+# secrets & local env
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+
+# build artifacts
+*.apk
+*.aab
