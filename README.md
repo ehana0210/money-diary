@@ -1,7 +1,8 @@
 # 용돈기입장 (Money Diary)
 
 Android WebView 앱으로 동작하는 초등학생용 용돈 기입장입니다.  
-들어온 돈·나간 돈 내역은 WebView의 **localStorage**에 저장되며, 앱을 껐다 켜도 유지됩니다.
+들어온 돈·나간 돈 내역은 **백엔드 API(Spring Boot on Cloud Run) → Firestore**에 저장됩니다.  
+앱은 별도 회원가입 없이 **Firebase 익명 인증**으로 자동 로그인하며, 기기별 사용자(UID)로 데이터가 분리됩니다.
 
 ## 구조
 
@@ -10,10 +11,18 @@ app/src/main/
 ├── assets/          # WebView에서 로드하는 HTML/CSS/JS
 │   ├── index.html
 │   ├── styles.css
-│   └── app.js
-├── java/.../MainActivity.kt   # WebView + domStorageEnabled
+│   └── app.js       # 백엔드 /api/* 호출 (Firebase ID 토큰 사용)
+├── java/.../MainActivity.kt   # WebView + Firebase 익명 인증 + 토큰 브리지
 └── res/
+
+server/              # Spring Boot API 서버 (Cloud Run). server/README.md 참고
 ```
+
+데이터 흐름: `WebView(app.js)` → Firebase ID 토큰 첨부 → `Cloud Run(Spring Boot)` → `Firestore (users/{uid}/...)`
+
+- Android 네이티브가 `FirebaseAuth.signInAnonymously()` 로 받은 ID 토큰을 JS 브리지(`AndroidBridge`)로 WebView 에 전달
+- `app.js` 가 `Authorization: Bearer <token>` 헤더로 백엔드 호출
+- 배포 URL: `https://money-diary-api-223320053383.asia-northeast3.run.app`
 
 ## 기능
 
@@ -24,7 +33,7 @@ app/src/main/
 - **캘린더** (날짜별 내역)
 - **카테고리 추가·삭제**
 - 커스텀 확인 팝업
-- localStorage 자동 저장
+- 백엔드(Firestore) 저장, Firebase 익명 인증으로 사용자별 데이터 분리
 
 ## 실행 방법
 
@@ -34,7 +43,10 @@ app/src/main/
 WebView 설정 (`MainActivity.kt`):
 
 - `javaScriptEnabled = true`
-- `domStorageEnabled = true` ← localStorage 사용에 필수
+- `allowUniversalAccessFromFileURLs = true` ← file:// 페이지에서 원격 API 호출 허용
+- `addJavascriptInterface(AuthBridge(), "AndroidBridge")` ← 익명 인증 ID 토큰 전달
+
+> 사전 준비: Firebase 콘솔에서 **익명 인증(Anonymous) 활성화** + `app/google-services.json` 배치가 필요합니다.
 
 ## 웹 UI 수정
 

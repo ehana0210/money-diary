@@ -1,0 +1,9 @@
+.gradle
+build
+*.md
+.git
+.idea
+*.iml
+.env
+.env.*
+service-account*.json

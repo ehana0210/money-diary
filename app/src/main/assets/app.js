@@ -1,5 +1,239 @@
-const STORAGE_KEY = 'money-diary-entries';
-const CATEGORIES_KEY = 'money-diary-categories';
+const API_BASE = (window.AndroidBridge && window.AndroidBridge.getApiBase)
+  ? window.AndroidBridge.getApiBase()
+  : 'http://localhost:8080';
+
+// --- 인증 토큰 (Android 네이티브 익명 인증에서 브리지로 전달) ---
+let idToken = null;
+let tokenWaiters = [];
+let tokenRequested = false;
+
+window.__onAuthToken = function (token) {
+  idToken = token || null;
+  const waiters = tokenWaiters;
+  tokenWaiters = [];
+  tokenRequested = false;
+  waiters.forEach((resolve) => resolve(idToken));
+};
+
+function requestTokenFromNative(force) {
+  if (window.AndroidBridge && window.AndroidBridge.requestToken) {
+    window.AndroidBridge.requestToken(!!force);
+  } else {
+    // 브리지가 없는 환경(일반 브라우저 등)에서는 토큰 없이 진행
+    window.__onAuthToken(null);
+  }
+}
+
+function ensureToken(force) {
+  if (idToken && !force) return Promise.resolve(idToken);
+  return new Promise((resolve) => {
+    tokenWaiters.push(resolve);
+    if (!tokenRequested) {
+      tokenRequested = true;
+      requestTokenFromNative(force);
+    }
+  });
+}
+
+async function apiFetch(path, options = {}, retry = true) {
+  const token = await ensureToken(false);
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  const res = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
+
+  if ((res.status === 401 || res.status === 403) && retry) {
+    idToken = null;
+    await ensureToken(true);
+    return apiFetch(path, options, false);
+  }
+  if (!res.ok) {
+    throw new Error('API ' + res.status + ' ' + path);
+  }
+  if (res.status === 204) return null;
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// --- 서버에서 불러온 데이터를 담는 인메모리 상태 ---
+const state = {
+  entries: [],
+  categories: { income: [], expense: [] },
+};
+
+function typeToServer(t) {
+  return t === 'income' ? 'INCOME' : 'EXPENSE';
+}
+
+function typeToClient(t) {
+  return t === 'INCOME' ? 'income' : 'expense';
+}
+
+function mapServerTransaction(t) {
+  return {
+    id: t.id,
+    type: typeToClient(t.type),
+    amount: t.amount,
+    category: t.category,
+    date: t.date,
+    memo: t.memo || '',
+    clientId: t.clientId || null,
+    createdAt: t.createdAt || 0,
+  };
+}
+
+function mapServerCategory(c) {
+  return {
+    value: c.id,
+    label: c.name,
+    icon: c.icon || '📝',
+    custom: !!c.custom,
+    type: typeToClient(c.type),
+  };
+}
+
+function groupCategories(list) {
+  const grouped = { income: [], expense: [] };
+  list.forEach((c) => {
+    const key = c.type === 'income' ? 'income' : 'expense';
+    grouped[key].push(c);
+  });
+  return grouped;
+}
+
+async function seedDefaultCategories() {
+  for (const type of ['expense', 'income']) {
+    for (const c of DEFAULT_CATEGORIES[type]) {
+      await apiFetch('/api/categories', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: c.label,
+          type: typeToServer(type),
+          icon: c.icon,
+          custom: false,
+        }),
+      });
+    }
+  }
+}
+
+async function loadAllFromServer() {
+  const [txs, cats] = await Promise.all([
+    apiFetch('/api/transactions'),
+    apiFetch('/api/categories'),
+  ]);
+
+  state.entries = (txs || []).map(mapServerTransaction);
+
+  let categories = (cats || []).map(mapServerCategory);
+  if (categories.length === 0) {
+    await seedDefaultCategories();
+    const seeded = await apiFetch('/api/categories');
+    categories = (seeded || []).map(mapServerCategory);
+  }
+  state.categories = groupCategories(categories);
+}
+
+// --- 기존 localStorage 데이터 → 서버 일회성 마이그레이션 ---
+const LEGACY_ENTRIES_KEY = 'money-diary-entries';
+const LEGACY_CATEGORIES_KEY = 'money-diary-categories';
+const MIGRATION_FLAG_KEY = 'money-diary-migrated-v1';
+
+function readLegacyData() {
+  let entries = [];
+  let categories = null;
+  try {
+    const r = localStorage.getItem(LEGACY_ENTRIES_KEY);
+    if (r) entries = JSON.parse(r);
+  } catch (e) {
+    /* ignore */
+  }
+  try {
+    const r = localStorage.getItem(LEGACY_CATEGORIES_KEY);
+    if (r) categories = JSON.parse(r);
+  } catch (e) {
+    /* ignore */
+  }
+  return { entries: entries || [], categories };
+}
+
+async function migrateLegacyIfNeeded() {
+  if (localStorage.getItem(MIGRATION_FLAG_KEY)) return false;
+
+  const legacy = readLegacyData();
+  const hasEntries = legacy.entries.length > 0;
+  if (!hasEntries) {
+    // 옮길 거래가 없으면 마이그레이션 불필요(카테고리는 기본 시드로 처리)
+    return false;
+  }
+
+  // 카테고리 기준 데이터: 저장된 게 없으면 기본 카테고리로 대체
+  // (사용자가 카테고리를 한 번도 수정하지 않았어도 거래는 기본 value 를 참조하므로)
+  const cats = legacy.categories || JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+
+  // 이미 서버에 있는 데이터로 중복 방지 (재시도 시 멱등성 보장)
+  // - 카테고리: name+type
+  // - 거래: clientId (옛 localStorage 항목의 id)
+  const [existing, existingTx] = await Promise.all([
+    apiFetch('/api/categories'),
+    apiFetch('/api/transactions'),
+  ]);
+  const keyOf = (type, name) => type + '::' + name;
+  const serverByKey = new Map();
+  (existing || []).forEach((c) => serverByKey.set(keyOf(typeToClient(c.type), c.name), c.id));
+
+  const existingClientIds = new Set();
+  (existingTx || []).forEach((t) => {
+    if (t.clientId) existingClientIds.add(String(t.clientId));
+  });
+
+  // 옛 카테고리 value -> 서버 문서 id 매핑
+  const valueMap = {};
+  for (const type of ['expense', 'income']) {
+    for (const c of (cats[type] || [])) {
+      const k = keyOf(type, c.label);
+      let id = serverByKey.get(k);
+      if (!id) {
+        const created = await apiFetch('/api/categories', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: c.label,
+            type: typeToServer(type),
+            icon: c.icon || '📝',
+            custom: !!c.custom,
+          }),
+        });
+        id = created.id;
+        serverByKey.set(k, id);
+      }
+      valueMap[type + '::' + c.value] = id;
+    }
+  }
+
+  // 거래를 원래 순서대로 업로드 (날짜 정렬은 서버 조회 시 처리)
+  // clientId 로 이미 올라간 항목은 건너뛰어 네트워크 끊김 후 재시도해도 중복되지 않게 한다.
+  for (const e of legacy.entries) {
+    const clientId = (e.id !== undefined && e.id !== null) ? String(e.id) : null;
+    if (clientId && existingClientIds.has(clientId)) continue;
+
+    const mappedCategory = valueMap[e.type + '::' + e.category] || e.category;
+    await apiFetch('/api/transactions', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: typeToServer(e.type),
+        amount: e.amount,
+        category: mappedCategory,
+        date: e.date,
+        memo: (e.memo || '').trim(),
+        clientId,
+      }),
+    });
+    if (clientId) existingClientIds.add(clientId);
+  }
+
+  localStorage.setItem(MIGRATION_FLAG_KEY, String(Date.now()));
+  return true;
+}
 
 const DEFAULT_CATEGORIES = {
   expense: [
@@ -164,30 +398,11 @@ function parseDate(dateStr) {
 }
 
 function loadEntries() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveEntries(entries) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  return state.entries;
 }
 
 function loadCategories() {
-  try {
-    const raw = localStorage.getItem(CATEGORIES_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    /* ignore */
-  }
-  return JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-}
-
-function saveCategories(categories) {
-  localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+  return state.categories;
 }
 
 function getCategoryInfo(type, value) {
@@ -271,7 +486,7 @@ function renderSummary(entries) {
 function renderList(entries) {
   const filter = filterSelect.value;
   const filtered = filter === 'all' ? entries : entries.filter((e) => e.type === filter);
-  const sorted = [...filtered].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  const sorted = [...filtered].sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt - b.createdAt));
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   if (currentPage > totalPages) currentPage = totalPages;
@@ -395,7 +610,7 @@ function renderCalendar() {
 function renderCalendarDayList(entries) {
   const dayEntries = entries
     .filter((e) => e.date === selectedCalDate)
-    .sort((a, b) => b.id - a.id);
+    .sort((a, b) => b.createdAt - a.createdAt);
 
   calDayTitle.textContent = formatDate(selectedCalDate);
   calDayList.innerHTML = dayEntries.map((e) => renderEntryItem(e, false)).join('');
@@ -431,64 +646,82 @@ function render() {
   renderCategoryManager();
 }
 
-function addEntry(data) {
-  const entries = loadEntries();
-  entries.push({
-    id: Date.now(),
-    type: data.type,
-    date: data.date,
-    amount: data.amount,
-    category: data.category,
-    memo: data.memo.trim(),
-  });
-  saveEntries(entries);
-  currentPage = Math.max(1, Math.ceil(entries.filter((e) => {
-    const filter = filterSelect.value;
-    return filter === 'all' || e.type === filter;
-  }).length / PAGE_SIZE));
-  render();
+async function addEntry(data) {
+  try {
+    const created = await apiFetch('/api/transactions', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: typeToServer(data.type),
+        amount: data.amount,
+        category: data.category,
+        date: data.date,
+        memo: (data.memo || '').trim(),
+      }),
+    });
+    state.entries.push(mapServerTransaction(created));
+    currentPage = Math.max(1, Math.ceil(state.entries.filter((e) => {
+      const filter = filterSelect.value;
+      return filter === 'all' || e.type === filter;
+    }).length / PAGE_SIZE));
+    render();
+  } catch (e) {
+    showAlert('저장에 실패했어요. 인터넷 연결을 확인해 주세요.');
+  }
 }
 
-function deleteEntry(id) {
-  saveEntries(loadEntries().filter((e) => e.id !== id));
-  render();
+async function deleteEntry(id) {
+  try {
+    await apiFetch('/api/transactions/' + id, { method: 'DELETE' });
+    state.entries = state.entries.filter((e) => e.id !== id);
+    render();
+  } catch (e) {
+    showAlert('삭제에 실패했어요. 인터넷 연결을 확인해 주세요.');
+  }
 }
 
-function addCategory(type, label, icon) {
-  const categories = loadCategories();
+async function addCategory(type, label, icon) {
   const trimmed = label.trim();
   if (!trimmed) return;
 
-  const duplicate = categories[type].some((c) => c.label === trimmed);
+  const duplicate = state.categories[type].some((c) => c.label === trimmed);
   if (duplicate) {
     showAlert('같은 이름의 카테고리가 이미 있어요.');
     return;
   }
 
-  categories[type].push({
-    value: `custom-${Date.now()}`,
-    label: trimmed,
-    icon,
-    custom: true,
-  });
-  saveCategories(categories);
-  updateCategoryOptions(getSelectedType());
-  renderCategoryManager();
+  try {
+    const created = await apiFetch('/api/categories', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: trimmed,
+        type: typeToServer(type),
+        icon,
+        custom: true,
+      }),
+    });
+    state.categories[type].push(mapServerCategory(created));
+    updateCategoryOptions(getSelectedType());
+    renderCategoryManager();
+  } catch (e) {
+    showAlert('카테고리 추가에 실패했어요.');
+  }
 }
 
-function deleteCategory(type, value) {
-  const entries = loadEntries();
-  const inUse = entries.some((e) => e.type === type && e.category === value);
+async function deleteCategory(type, value) {
+  const inUse = state.entries.some((e) => e.type === type && e.category === value);
   if (inUse) {
     showAlert('이 카테고리를 사용 중이라 지울 수 없어요.');
     return;
   }
 
-  const categories = loadCategories();
-  categories[type] = categories[type].filter((c) => c.value !== value);
-  saveCategories(categories);
-  updateCategoryOptions(getSelectedType());
-  renderCategoryManager();
+  try {
+    await apiFetch('/api/categories/' + value, { method: 'DELETE' });
+    state.categories[type] = state.categories[type].filter((c) => c.value !== value);
+    updateCategoryOptions(getSelectedType());
+    renderCategoryManager();
+  } catch (e) {
+    showAlert('카테고리 삭제에 실패했어요.');
+  }
 }
 
 function switchTab(tab) {
@@ -528,7 +761,7 @@ calDayList.addEventListener('click', handleDeleteClick);
 function handleDeleteClick(e) {
   const btn = e.target.closest('.btn-delete');
   if (!btn) return;
-  const id = Number(btn.closest('.entry-item').dataset.id);
+  const id = btn.closest('.entry-item').dataset.id;
   showConfirm('이 내역을 지울까요?', () => deleteEntry(id));
 }
 
@@ -605,6 +838,16 @@ tabBtns.forEach((btn) => {
 
 catIconSelect.innerHTML = ICON_OPTIONS.map((icon) => `<option value="${icon}">${icon}</option>`).join('');
 
-initDatePicker();
-updateCategoryOptions('expense');
-render();
+async function init() {
+  initDatePicker();
+  try {
+    await migrateLegacyIfNeeded();
+    await loadAllFromServer();
+  } catch (e) {
+    showAlert('데이터를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.');
+  }
+  updateCategoryOptions('expense');
+  render();
+}
+
+init();

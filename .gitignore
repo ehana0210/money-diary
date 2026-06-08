@@ -14,6 +14,8 @@ local.properties
 # server
 /server/node_modules/
 /server/.env
+/server/build/
+/server/service-account*.json
 
 # store-screenshots dev deps
 /store-screenshots/node_modules/

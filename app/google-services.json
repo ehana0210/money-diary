@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "223320053383",
+    "project_id": "money-diary-498803",
+    "storage_bucket": "money-diary-498803.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:223320053383:android:d8b2ea1308cef2a37c4a22",
+        "android_client_info": {
+          "package_name": "com.moneydiary.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDuwM8_arhaLzASERR4PiQ8vlAqqlcOd88"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

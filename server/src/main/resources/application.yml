@@ -1,0 +1,26 @@
+server:
+  # Cloud Run injects the PORT env var; default to 8080 for local runs.
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: money-diary-api
+
+# GCP project id used by Firebase Admin / Firestore.
+# On Cloud Run this is usually resolved automatically from the runtime
+# service account, but it can be overridden via the GCP_PROJECT_ID env var.
+gcp:
+  project-id: ${GCP_PROJECT_ID:}
+  firestore:
+    # named 데이터베이스를 쓰면 그 ID를, 기본 DB 면 "(default)".
+    database-id: ${GCP_FIRESTORE_DATABASE_ID:(default)}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
