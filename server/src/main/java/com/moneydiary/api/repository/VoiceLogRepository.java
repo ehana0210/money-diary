@@ -15,10 +15,15 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 /**
- * users/{uid}/voiceLogs 서브컬렉션에 대한 Firestore 접근.
+ * 최상위 {@code voiceLogs} 컬렉션에 대한 Firestore 접근.
+ *
+ * <p>사용자 데이터(users/{uid}/...)와 분리해 별도 컬렉션에 적재하며,
+ * 각 문서의 {@code uid} 필드로 사용자를 구분한다.
  */
 @Repository
 public class VoiceLogRepository {
+
+    private static final String COLLECTION = "voiceLogs";
 
     private final Firestore firestore;
 
@@ -26,21 +31,23 @@ public class VoiceLogRepository {
         this.firestore = firestore;
     }
 
-    private CollectionReference collection(String uid) {
-        return firestore.collection("users").document(uid).collection("voiceLogs");
+    private CollectionReference collection() {
+        return firestore.collection(COLLECTION);
     }
 
     public VoiceLog create(String uid, VoiceLog log) {
-        DocumentReference ref = collection(uid).document();
+        log.setUid(uid);
+        DocumentReference ref = collection().document();
         await(ref.set(log));
         log.setId(ref.getId());
         return log;
     }
 
-    /** 최근 기록부터 최대 {@code limit} 건 조회. */
+    /** 해당 사용자의 최근 기록부터 최대 {@code limit} 건 조회. */
     public List<VoiceLog> findRecent(String uid, int limit) {
         List<QueryDocumentSnapshot> docs = await(
-                collection(uid)
+                collection()
+                        .whereEqualTo("uid", uid)
                         .orderBy("createdAt", Query.Direction.DESCENDING)
                         .limit(limit)
                         .get())

@@ -17,6 +17,9 @@ public class VoiceLog {
 
     private String id;
 
+    /** 소유 사용자 UID (별도 최상위 컬렉션에서 사용자 구분용). */
+    private String uid;
+
     /** 원문(음성 인식 결과 또는 입력 텍스트). */
     private String rawText;
     /** 입력 출처: "voice" | "text". */
@@ -49,6 +52,14 @@ public class VoiceLog {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public String getUid() {
+        return uid;
+    }
+
+    public void setUid(String uid) {
+        this.uid = uid;
     }
 
     public String getRawText() {
