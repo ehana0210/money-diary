@@ -14,6 +14,10 @@ gcp:
   firestore:
     # named 데이터베이스를 쓰면 그 ID를, 기본 DB 면 "(default)".
     database-id: ${GCP_FIRESTORE_DATABASE_ID:(default)}
+  vertex:
+    # Vertex AI(Gemini) 위치/모델. "global" 엔드포인트가 가장 범용적으로 동작.
+    location: ${VERTEX_LOCATION:global}
+    model: ${GEMINI_MODEL:gemini-2.5-flash}
 
 management:
   endpoints:

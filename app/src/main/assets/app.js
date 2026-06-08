@@ -838,6 +838,109 @@ tabBtns.forEach((btn) => {
 
 catIconSelect.innerHTML = ICON_OPTIONS.map((icon) => `<option value="${icon}">${icon}</option>`).join('');
 
+// --- AI 음성 입력 ---
+const voiceBtn = document.getElementById('voice-btn');
+const voiceHint = document.getElementById('voice-hint');
+const VOICE_HINT_DEFAULT = '말하면 AI가 알아서 채워줘요. 확인하고 추가하기를 눌러주세요.';
+
+function setEntryType(clientType) {
+  typeInputs.forEach((input) => {
+    input.checked = input.value === clientType;
+  });
+}
+
+function selectCategoryForForm(parsed, clientType) {
+  const cats = state.categories[clientType] || [];
+  let value = null;
+
+  // 1) 서버에서 매칭된 카테고리 id
+  if (parsed.category && cats.some((c) => c.value === parsed.category)) {
+    value = parsed.category;
+  }
+  // 2) 이름으로 매칭
+  if (!value && parsed.categoryName) {
+    const byName = cats.find((c) => c.label === parsed.categoryName);
+    if (byName) value = byName.value;
+  }
+  // 3) 기타 → 첫 번째 순으로 폴백
+  if (!value) {
+    const etc = cats.find((c) => c.label === '기타');
+    value = etc ? etc.value : (cats[0] && cats[0].value) || '';
+  }
+  if (value) categorySelect.value = value;
+}
+
+function applyParsedToForm(parsed) {
+  const clientType = typeToClient(parsed.type);
+  setEntryType(clientType);
+  updateCategoryOptions(clientType);
+
+  if (parsed.date) setDatePickerFromString(parsed.date);
+  if (parsed.amount) amountInput.value = parsed.amount;
+  memoInput.value = parsed.memo || '';
+  selectCategoryForForm(parsed, clientType);
+
+  amountInput.focus();
+}
+
+function setVoiceState(state) {
+  // state: 'idle' | 'listening' | 'parsing'
+  voiceBtn.classList.toggle('listening', state === 'listening');
+  voiceBtn.disabled = state !== 'idle';
+  if (state === 'listening') {
+    voiceHint.textContent = '듣고 있어요… 또박또박 말해주세요.';
+  } else if (state === 'parsing') {
+    voiceHint.textContent = 'AI가 분석하고 있어요…';
+  } else {
+    voiceHint.textContent = VOICE_HINT_DEFAULT;
+  }
+}
+
+function startVoiceInput() {
+  if (window.AndroidBridge && window.AndroidBridge.startVoice) {
+    setVoiceState('listening');
+    window.AndroidBridge.startVoice();
+  } else {
+    showAlert('이 기기에서는 음성 입력을 사용할 수 없어요.');
+  }
+}
+
+// 네이티브 음성 인식 결과 콜백
+window.__onVoiceResult = async function (text) {
+  if (text === '__NO_RECOGNIZER__') {
+    setVoiceState('idle');
+    showAlert('이 기기에서 음성 인식을 사용할 수 없어요.');
+    return;
+  }
+
+  const spoken = (text || '').trim();
+  if (!spoken) {
+    // 취소했거나 인식된 말이 없음
+    setVoiceState('idle');
+    return;
+  }
+
+  setVoiceState('parsing');
+  try {
+    const parsed = await apiFetch('/api/ai/parse-transaction', {
+      method: 'POST',
+      body: JSON.stringify({ text: spoken, source: 'voice' }),
+    });
+    if (!parsed || !parsed.valid) {
+      const reason = (parsed && parsed.reason) ? parsed.reason : '잘 못 알아들었어요. 다시 말해줄래요?';
+      showAlert(reason);
+      return;
+    }
+    applyParsedToForm(parsed);
+  } catch (e) {
+    showAlert('AI 분석에 실패했어요. 다시 시도해 주세요.');
+  } finally {
+    setVoiceState('idle');
+  }
+};
+
+voiceBtn.addEventListener('click', startVoiceInput);
+
 async function init() {
   initDatePicker();
   try {

@@ -1,5 +1,6 @@
 package com.moneydiary.api.web;
 
+import com.moneydiary.api.ai.AiException;
 import com.moneydiary.api.repository.ResourceNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,5 +22,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("error", "bad_request", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AiException.class)
+    public ResponseEntity<Map<String, String>> handleAi(AiException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(Map.of("error", "ai_error", "message", ex.getMessage()));
     }
 }

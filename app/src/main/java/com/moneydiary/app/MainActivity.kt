@@ -1,13 +1,17 @@
 package com.moneydiary.app
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.auth.FirebaseAuth
 import org.json.JSONObject
@@ -16,6 +20,20 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var auth: FirebaseAuth
+
+    /** 음성 인식 결과를 받아 WebView 로 전달한다. */
+    private val voiceLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val text = if (result.resultCode == RESULT_OK) {
+                result.data
+                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                    ?.firstOrNull()
+                    .orEmpty()
+            } else {
+                ""
+            }
+            sendVoiceResultToWeb(text)
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,6 +113,40 @@ class MainActivity : AppCompatActivity() {
                     }
                     .addOnFailureListener { pushToken(null) }
             }
+        }
+
+        /**
+         * 한국어 음성 인식을 시작한다. 인식 결과는 JS 의 window.__onVoiceResult(text) 로 전달된다.
+         */
+        @JavascriptInterface
+        fun startVoice() {
+            runOnUiThread { launchVoice() }
+        }
+    }
+
+    private fun launchVoice() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "말해보세요. 예: 어제 떡볶이 3000원")
+        }
+        try {
+            voiceLauncher.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            sendVoiceResultToWeb("__NO_RECOGNIZER__")
+        }
+    }
+
+    private fun sendVoiceResultToWeb(text: String) {
+        val arg = JSONObject.quote(text)
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "window.__onVoiceResult && window.__onVoiceResult($arg);",
+                null
+            )
         }
     }
 

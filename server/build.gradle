@@ -25,6 +25,9 @@ dependencies {
     // Firebase Admin SDK: Firestore + Authentication (ID token verification)
     implementation 'com.google.firebase:firebase-admin:9.4.1'
 
+    // Google Gen AI SDK: Gemini on Vertex AI (uses ADC / runtime service account, no API key)
+    implementation 'com.google.genai:google-genai:1.57.0'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
 }
