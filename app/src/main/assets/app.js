@@ -283,16 +283,18 @@ const calMonthLabel = document.getElementById('cal-month-label');
 const calendarGrid = document.getElementById('calendar-grid');
 const calPrevBtn = document.getElementById('cal-prev');
 const calNextBtn = document.getElementById('cal-next');
-const calDayTitle = document.getElementById('cal-day-title');
-const calDayList = document.getElementById('cal-day-list');
-const calDayEmpty = document.getElementById('cal-day-empty');
+const calDaySummary = document.getElementById('cal-day-summary');
 
 const categoryForm = document.getElementById('category-form');
 const catIconSelect = document.getElementById('cat-icon');
 const catLabelInput = document.getElementById('cat-label');
 const categoryListEl = document.getElementById('category-list');
 const catTypeInputs = document.querySelectorAll('input[name="cat-type"]');
-
+const categoryPagination = document.getElementById('category-pagination');
+const catPagePrevBtn = document.getElementById('cat-page-prev');
+const catPageNextBtn = document.getElementById('cat-page-next');
+const catPageInfoEl = document.getElementById('cat-page-info');
+const statsMoreEl = document.getElementById('stats-more');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const panels = document.querySelectorAll('.panel');
 
@@ -305,8 +307,14 @@ let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalDate = getTodayString();
 let currentPage = 1;
+let catCurrentPage = 1;
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 2;
+const STATS_CAT_MAX = 3;
+const CAT_PAGE_SIZE = 4;
+
+// 한 건당 입력할 수 있는 최대 금액(원). 장난 입력(예: 100억)을 막기 위한 상한선.
+const MAX_AMOUNT = 1000000;
 
 function closeModal() {
   modalOverlay.classList.add('hidden');
@@ -486,7 +494,7 @@ function renderSummary(entries) {
 function renderList(entries) {
   const filter = filterSelect.value;
   const filtered = filter === 'all' ? entries : entries.filter((e) => e.type === filter);
-  const sorted = [...filtered].sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt - b.createdAt));
+  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt - a.createdAt));
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   if (currentPage > totalPages) currentPage = totalPages;
@@ -502,6 +510,7 @@ function renderList(entries) {
   pageInfoEl.textContent = `${currentPage} / ${totalPages}`;
   pagePrevBtn.disabled = currentPage <= 1;
   pageNextBtn.disabled = currentPage >= totalPages;
+
 }
 
 function renderStats() {
@@ -531,9 +540,10 @@ function renderStats() {
   });
 
   const sortedCats = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
-  const maxAmount = sortedCats[0]?.[1] || 0;
+  const displayCats = sortedCats.slice(0, STATS_CAT_MAX);
+  const maxAmount = displayCats[0]?.[1] || 0;
 
-  statsCategoryList.innerHTML = sortedCats
+  statsCategoryList.innerHTML = displayCats
     .map(([catValue, amount]) => {
       const cat = getCategoryInfo('expense', catValue);
       const pct = maxAmount ? Math.round((amount / maxAmount) * 100) : 0;
@@ -554,6 +564,11 @@ function renderStats() {
     .join('');
 
   statsEmpty.classList.toggle('hidden', sortedCats.length > 0);
+  if (statsMoreEl) {
+    const moreCount = sortedCats.length - STATS_CAT_MAX;
+    statsMoreEl.textContent = moreCount > 0 ? `외 ${moreCount}개 카테고리` : '';
+    statsMoreEl.classList.toggle('hidden', moreCount <= 0);
+  }
 }
 
 function getDaySummary(entries, dateStr) {
@@ -585,12 +600,10 @@ function renderCalendar() {
     const isSelected = dateStr === selectedCalDate;
 
     let dotClass = '';
-    let amountHint = '';
     if (summary.count > 0) {
       if (summary.net > 0) dotClass = 'dot-income';
       else if (summary.net < 0) dotClass = 'dot-expense';
       else dotClass = 'dot-neutral';
-      amountHint = summary.net >= 0 ? `+${summary.net.toLocaleString()}` : summary.net.toLocaleString();
     }
 
     cells += `
@@ -598,30 +611,40 @@ function renderCalendar() {
         data-date="${dateStr}">
         <span class="cal-day">${day}</span>
         ${summary.count ? `<span class="cal-dot ${dotClass}"></span>` : ''}
-        ${summary.count ? `<span class="cal-amount">${amountHint}</span>` : ''}
       </button>
     `;
   }
 
   calendarGrid.innerHTML = cells;
-  renderCalendarDayList(entries);
+  renderCalendarDaySummary(entries);
 }
 
-function renderCalendarDayList(entries) {
-  const dayEntries = entries
-    .filter((e) => e.date === selectedCalDate)
-    .sort((a, b) => b.createdAt - a.createdAt);
+function renderCalendarDaySummary(entries) {
+  if (!calDaySummary) return;
 
-  calDayTitle.textContent = formatDate(selectedCalDate);
-  calDayList.innerHTML = dayEntries.map((e) => renderEntryItem(e, false)).join('');
-  calDayEmpty.classList.toggle('hidden', dayEntries.length > 0);
+  const summary = getDaySummary(entries, selectedCalDate);
+  if (summary.count === 0) {
+    calDaySummary.textContent = `${formatDate(selectedCalDate)} · 내역 없음`;
+    return;
+  }
+
+  const parts = [`${formatDate(selectedCalDate)} · ${summary.count}건`];
+  if (summary.income > 0) parts.push(`들어온 돈 ${formatMoney(summary.income)}`);
+  if (summary.expense > 0) parts.push(`나간 돈 ${formatMoney(summary.expense)}`);
+  calDaySummary.textContent = parts.join(' · ');
 }
 
 function renderCategoryManager() {
   const type = getSelectedCatType();
   const categories = loadCategories()[type];
+  const totalPages = Math.max(1, Math.ceil(categories.length / CAT_PAGE_SIZE));
+  if (catCurrentPage > totalPages) catCurrentPage = totalPages;
+  if (catCurrentPage < 1) catCurrentPage = 1;
 
-  categoryListEl.innerHTML = categories
+  const start = (catCurrentPage - 1) * CAT_PAGE_SIZE;
+  const pageItems = categories.slice(start, start + CAT_PAGE_SIZE);
+
+  categoryListEl.innerHTML = pageItems
     .map(
       (cat) => `
       <li class="category-item">
@@ -635,6 +658,13 @@ function renderCategoryManager() {
     `
     )
     .join('');
+
+  if (categoryPagination) {
+    categoryPagination.classList.toggle('hidden', categories.length <= CAT_PAGE_SIZE);
+    catPageInfoEl.textContent = `${catCurrentPage} / ${totalPages}`;
+    catPagePrevBtn.disabled = catCurrentPage <= 1;
+    catPageNextBtn.disabled = catCurrentPage >= totalPages;
+  }
 }
 
 function render() {
@@ -646,7 +676,22 @@ function render() {
   renderCategoryManager();
 }
 
+function getCurrentBalance() {
+  const income = sumByType(state.entries, 'income');
+  const expense = sumByType(state.entries, 'expense');
+  return income - expense;
+}
+
 async function addEntry(data) {
+  // 나간 돈이 현재 잔액보다 많으면 잔액이 마이너스가 되므로 막는다.
+  if (data.type === 'expense') {
+    const balance = getCurrentBalance();
+    if (data.amount > balance) {
+      showAlert(`남은 돈보다 많이 쓸 수 없어요. 지금 남은 있는 돈은 ${formatMoney(balance)}이에요.`);
+      return false;
+    }
+  }
+
   try {
     const created = await apiFetch('/api/transactions', {
       method: 'POST',
@@ -659,13 +704,12 @@ async function addEntry(data) {
       }),
     });
     state.entries.push(mapServerTransaction(created));
-    currentPage = Math.max(1, Math.ceil(state.entries.filter((e) => {
-      const filter = filterSelect.value;
-      return filter === 'all' || e.type === filter;
-    }).length / PAGE_SIZE));
+    currentPage = 1;
     render();
+    return true;
   } catch (e) {
     showAlert('저장에 실패했어요. 인터넷 연결을 확인해 주세요.');
+    return false;
   }
 }
 
@@ -734,7 +778,22 @@ typeInputs.forEach((input) => {
 });
 
 catTypeInputs.forEach((input) => {
-  input.addEventListener('change', renderCategoryManager);
+  input.addEventListener('change', () => {
+    catCurrentPage = 1;
+    renderCategoryManager();
+  });
+});
+
+catPagePrevBtn.addEventListener('click', () => {
+  if (catCurrentPage > 1) {
+    catCurrentPage -= 1;
+    renderCategoryManager();
+  }
+});
+
+catPageNextBtn.addEventListener('click', () => {
+  catCurrentPage += 1;
+  renderCategoryManager();
 });
 
 form.addEventListener('submit', (e) => {
@@ -742,6 +801,10 @@ form.addEventListener('submit', (e) => {
   const type = getSelectedType();
   const amount = parseInt(amountInput.value, 10);
   if (!amount || amount <= 0) return;
+  if (amount > MAX_AMOUNT) {
+    showAlert(`금액은 최대 ${formatMoney(MAX_AMOUNT)}까지만 넣을 수 있어요.`);
+    return;
+  }
 
   addEntry({
     type,
@@ -749,14 +812,15 @@ form.addEventListener('submit', (e) => {
     amount,
     category: categorySelect.value,
     memo: memoInput.value,
+  }).then((saved) => {
+    if (saved) {
+      amountInput.value = '';
+      memoInput.value = '';
+    }
   });
-
-  amountInput.value = '';
-  memoInput.value = '';
 });
 
 entryList.addEventListener('click', handleDeleteClick);
-calDayList.addEventListener('click', handleDeleteClick);
 
 function handleDeleteClick(e) {
   const btn = e.target.closest('.btn-delete');
@@ -840,8 +904,8 @@ catIconSelect.innerHTML = ICON_OPTIONS.map((icon) => `<option value="${icon}">${
 
 // --- AI 음성 입력 ---
 const voiceBtn = document.getElementById('voice-btn');
-const voiceHint = document.getElementById('voice-hint');
-const VOICE_HINT_DEFAULT = '말하면 AI가 알아서 채워줘요. 확인하고 추가하기를 눌러주세요.';
+const voiceBtnText = voiceBtn ? voiceBtn.querySelector('.btn-voice-text') : null;
+const submitEntryBtn = form.querySelector('button[type="submit"]');
 
 function setEntryType(clientType) {
   typeInputs.forEach((input) => {
@@ -849,51 +913,88 @@ function setEntryType(clientType) {
   });
 }
 
-function selectCategoryForForm(parsed, clientType) {
+function resolveCategoryFromParsed(parsed, clientType) {
   const cats = state.categories[clientType] || [];
   let value = null;
 
-  // 1) 서버에서 매칭된 카테고리 id
   if (parsed.category && cats.some((c) => c.value === parsed.category)) {
     value = parsed.category;
   }
-  // 2) 이름으로 매칭
   if (!value && parsed.categoryName) {
     const byName = cats.find((c) => c.label === parsed.categoryName);
     if (byName) value = byName.value;
   }
-  // 3) 기타 → 첫 번째 순으로 폴백
   if (!value) {
     const etc = cats.find((c) => c.label === '기타');
     value = etc ? etc.value : (cats[0] && cats[0].value) || '';
   }
-  if (value) categorySelect.value = value;
+  return value;
 }
 
-function applyParsedToForm(parsed) {
+function resetEntryForm() {
+  setEntryType('expense');
+  updateCategoryOptions('expense');
+  setDatePickerFromString(getTodayString());
+  amountInput.value = '';
+  memoInput.value = '';
+}
+
+function buildEntryFromParsed(parsed) {
   const clientType = typeToClient(parsed.type);
-  setEntryType(clientType);
-  updateCategoryOptions(clientType);
+  return {
+    type: clientType,
+    date: parsed.date || getTodayString(),
+    amount: parsed.amount,
+    category: resolveCategoryFromParsed(parsed, clientType),
+    memo: parsed.memo || '',
+  };
+}
 
-  if (parsed.date) setDatePickerFromString(parsed.date);
-  if (parsed.amount) amountInput.value = parsed.amount;
-  memoInput.value = parsed.memo || '';
-  selectCategoryForForm(parsed, clientType);
+function buildVoiceConfirmMessage(entry) {
+  const cat = getCategoryInfo(entry.type, entry.category);
+  const typeLabel = entry.type === 'income' ? '들어온 돈' : '나간 돈';
+  return (
+    `이렇게 저장할까요?\n\n` +
+    `${formatDate(entry.date)}\n` +
+    `${cat.icon} ${cat.label}\n` +
+    `${typeLabel} ${formatMoney(entry.amount)}`
+  );
+}
 
-  amountInput.focus();
+function isVoiceEntryInvalid(entry) {
+  if (!entry.amount || entry.amount <= 0) {
+    return '금액을 알아듣지 못했어요. 다시 말해줄래요?';
+  }
+  if (entry.amount > MAX_AMOUNT) {
+    return `금액은 최대 ${formatMoney(MAX_AMOUNT)}까지만 넣을 수 있어요.\n다시 말해줄래요?`;
+  }
+  if (entry.type === 'expense' && entry.amount > getCurrentBalance()) {
+    const balance = getCurrentBalance();
+    return `남은 돈보다 많이 쓸 수 없어요. 지금 남은 있는 돈은 ${formatMoney(balance)}이에요.`;
+  }
+  return null;
+}
+
+function confirmAndSaveVoiceEntry(entry) {
+  showConfirm(buildVoiceConfirmMessage(entry), async () => {
+    const saved = await addEntry(entry);
+    resetEntryForm();
+    if (!saved) {
+      // addEntry 내부에서 이미 안내 팝업을 띄웠다. 폼은 초기화된 상태를 유지한다.
+    }
+  });
 }
 
 function setVoiceState(state) {
   // state: 'idle' | 'listening' | 'parsing'
+  const busy = state !== 'idle';
   voiceBtn.classList.toggle('listening', state === 'listening');
-  voiceBtn.disabled = state !== 'idle';
-  if (state === 'listening') {
-    voiceHint.textContent = '듣고 있어요… 또박또박 말해주세요.';
-  } else if (state === 'parsing') {
-    voiceHint.textContent = 'AI가 분석하고 있어요…';
-  } else {
-    voiceHint.textContent = VOICE_HINT_DEFAULT;
-  }
+  voiceBtn.disabled = busy;
+  if (submitEntryBtn) submitEntryBtn.disabled = busy;
+  if (!voiceBtnText) return;
+  if (state === 'listening') voiceBtnText.textContent = '듣는 중…';
+  else if (state === 'parsing') voiceBtnText.textContent = '분석 중…';
+  else voiceBtnText.textContent = '음성 입력';
 }
 
 function startVoiceInput() {
@@ -928,14 +1029,27 @@ window.__onVoiceResult = async function (text) {
     });
     if (!parsed || !parsed.valid) {
       const reason = (parsed && parsed.reason) ? parsed.reason : '잘 못 알아들었어요. 다시 말해줄래요?';
+      resetEntryForm();
+      setVoiceState('idle');
       showAlert(reason);
       return;
     }
-    applyParsedToForm(parsed);
-  } catch (e) {
-    showAlert('AI 분석에 실패했어요. 다시 시도해 주세요.');
-  } finally {
+
+    const entry = buildEntryFromParsed(parsed);
+    const invalidReason = isVoiceEntryInvalid(entry);
+    if (invalidReason) {
+      resetEntryForm();
+      setVoiceState('idle');
+      showAlert(invalidReason);
+      return;
+    }
+
     setVoiceState('idle');
+    confirmAndSaveVoiceEntry(entry);
+  } catch (e) {
+    resetEntryForm();
+    setVoiceState('idle');
+    showAlert('AI 분석에 실패했어요. 다시 시도해 주세요.');
   }
 };
 

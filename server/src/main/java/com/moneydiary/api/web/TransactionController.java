@@ -24,6 +24,9 @@ import java.util.List;
 @RequestMapping("/api/transactions")
 public class TransactionController {
 
+    /** 한 건당 허용하는 최대 금액(원). 클라이언트와 동일한 상한선으로 장난 입력을 막는다. */
+    private static final long MAX_AMOUNT = 1_000_000L;
+
     private final TransactionRepository repository;
 
     public TransactionController(TransactionRepository repository) {
@@ -74,6 +77,9 @@ public class TransactionController {
         }
         if (request.amount() == null || request.amount() < 0) {
             throw new IllegalArgumentException("amount 는 0 이상의 값이어야 합니다.");
+        }
+        if (request.amount() > MAX_AMOUNT) {
+            throw new IllegalArgumentException("amount 는 " + MAX_AMOUNT + " 이하여야 합니다.");
         }
         if (request.category() == null || request.category().isBlank()) {
             throw new IllegalArgumentException("category 는 필수입니다.");

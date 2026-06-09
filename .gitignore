@@ -23,6 +23,7 @@ local.properties
 # secrets & local env
 *.jks
 *.keystore
+keystore.properties
 .env
 .env.*
 !.env.example
